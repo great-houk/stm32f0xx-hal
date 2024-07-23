@@ -29,9 +29,27 @@ use cast::{u16, u32};
 use cortex_m::peripheral::syst::SystClkSource;
 use cortex_m::peripheral::SYST;
 
-use crate::rcc::Rcc;
+use crate::{rcc::Rcc, time::Hertz, timers::Timer};
 
-use embedded_hal::blocking::delay::{DelayMs, DelayUs};
+use embedded_hal::{
+    blocking::delay::{DelayMs, DelayUs},
+    timer::CountDown,
+};
+use embedded_hal_1::delay::DelayNs;
+
+impl<TIM> DelayNs for Timer<TIM>
+where
+    Timer<TIM>: CountDown,
+    <Timer<TIM> as CountDown>::Time: From<Hertz>,
+{
+    fn delay_ns(&mut self, ns: u32) {
+        if ns == 0 {
+            return;
+        }
+        self.start(Hertz(1_000_000_000 / ns));
+        nb::block!(self.wait()).unwrap();
+    }
+}
 
 /// System timer (SysTick) as a delay provider
 #[derive(Clone)]

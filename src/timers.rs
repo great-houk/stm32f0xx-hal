@@ -185,8 +185,6 @@ macro_rules! timers {
                 {
                     // pause
                     self.tim.cr1.modify(|_, w| w.cen().clear_bit());
-                    // restart counter
-                    self.tim.cnt.reset();
 
                     let frequency = timeout.into().0;
                     // If pclk is prescaled from hclk, the frequency fed into the timers is doubled
@@ -202,6 +200,10 @@ macro_rules! timers {
 
                     let arr = cast::u16(ticks / cast::u32(psc + 1)).unwrap();
                     self.tim.arr.write(|w| unsafe { w.bits(cast::u32(arr)) });
+
+                    // Generate interrupt to load values
+                    self.tim.egr.write(|w| w.ug().set_bit());
+                    self.tim.sr.modify(|_, w| w.uif().clear_bit());
 
                     // start counter
                     self.tim.cr1.modify(|_, w| w.cen().set_bit());

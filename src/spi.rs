@@ -40,6 +40,7 @@
 use core::marker::PhantomData;
 use core::{ops::Deref, ptr};
 
+use defmt::Format;
 pub use embedded_hal::spi::{Mode, Phase, Polarity};
 
 // TODO Put this inside the macro
@@ -75,7 +76,7 @@ pub struct SixteenBit;
 
 /// SPI error
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Debug, Format)]
 pub enum Error {
     /// Overrun occurred
     Overrun,
@@ -274,7 +275,8 @@ where
         /* Make sure the SPI unit is disabled so we can configure it */
         self.spi.cr1.modify(|_, w| w.spe().clear_bit());
 
-        let br = match clocks.pclk().0 / speed.into().0 {
+        // Use div_ceil so output freq is always <= requested freq
+        let br = match clocks.pclk().0.div_ceil(speed.into().0) {
             0 => unreachable!(),
             1..=2 => 0b000,
             3..=5 => 0b001,
@@ -526,6 +528,111 @@ where
 
         // Do one last status register check before continuing
         nb::block!(self.check_send()).ok();
+        Ok(())
+    }
+}
+
+impl embedded_hal_1::spi::Error for Error {
+    fn kind(&self) -> embedded_hal_1::spi::ErrorKind {
+        match self {
+            Error::Overrun => embedded_hal_1::spi::ErrorKind::Overrun,
+            Error::ModeFault => embedded_hal_1::spi::ErrorKind::ModeFault,
+            Error::Crc => embedded_hal_1::spi::ErrorKind::Other,
+        }
+    }
+}
+impl<SPI, SCKPIN, MISOPIN, MOSIPIN, WIDTH> embedded_hal_1::spi::ErrorType
+    for Spi<SPI, SCKPIN, MISOPIN, MOSIPIN, WIDTH>
+where
+    SPI: Deref<Target = SpiRegisterBlock>,
+{
+    type Error = Error;
+}
+
+impl<SPI, SCKPIN, MISOPIN, MOSIPIN> embedded_hal_1::spi::SpiBus<u8>
+    for Spi<SPI, SCKPIN, MISOPIN, MOSIPIN, EightBit>
+where
+    SPI: Deref<Target = SpiRegisterBlock>,
+{
+    fn read(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
+        // We want to transfer bidirectionally, make sure we're in the correct mode
+        self.set_bidi();
+
+        for word in words.iter_mut() {
+            nb::block!(self.check_send())?;
+            self.send_u8(0); // FIXME is this necessary?
+            nb::block!(self.check_read())?;
+            *word = self.read_u8();
+        }
+        Ok(())
+    }
+
+    fn write(&mut self, words: &[u8]) -> Result<(), Self::Error> {
+        embedded_hal::blocking::spi::Write::write(self, words)
+    }
+
+    fn transfer(&mut self, read: &mut [u8], write: &[u8]) -> Result<(), Self::Error> {
+        // We want to transfer bidirectionally, make sure we're in the correct mode
+        self.set_bidi();
+
+        for (w, r) in write.iter().zip(read.iter_mut()) {
+            nb::block!(self.check_send())?;
+            self.send_u8(*w);
+            nb::block!(self.check_read())?;
+            *r = self.read_u8();
+        }
+        Ok(())
+    }
+
+    fn transfer_in_place(&mut self, words: &mut [u8]) -> Result<(), Self::Error> {
+        embedded_hal::blocking::spi::Transfer::transfer(self, words).map(|_| ())
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+impl<SPI, SCKPIN, MISOPIN, MOSIPIN> embedded_hal_1::spi::SpiBus<u16>
+    for Spi<SPI, SCKPIN, MISOPIN, MOSIPIN, SixteenBit>
+where
+    SPI: Deref<Target = SpiRegisterBlock>,
+{
+    fn read(&mut self, words: &mut [u16]) -> Result<(), Self::Error> {
+        // We want to transfer bidirectionally, make sure we're in the correct mode
+        self.set_bidi();
+
+        for word in words.iter_mut() {
+            nb::block!(self.check_send())?;
+            self.send_u16(0); // FIXME is this necessary?
+            nb::block!(self.check_read())?;
+            *word = self.read_u16();
+        }
+        Ok(())
+    }
+
+    fn write(&mut self, words: &[u16]) -> Result<(), Self::Error> {
+        embedded_hal::blocking::spi::Write::write(self, words)
+    }
+
+    fn transfer(&mut self, read: &mut [u16], write: &[u16]) -> Result<(), Self::Error> {
+        // We want to transfer bidirectionally, make sure we're in the correct mode
+        self.set_bidi();
+
+        for (w, r) in write.iter().zip(read.iter_mut()) {
+            nb::block!(self.check_send())?;
+            self.send_u16(*w);
+            nb::block!(self.check_read())?;
+            *r = self.read_u16();
+        }
+        Ok(())
+    }
+
+    fn transfer_in_place(&mut self, words: &mut [u16]) -> Result<(), Self::Error> {
+        embedded_hal::blocking::spi::Transfer::transfer(self, words).map(|_| ())
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
 }
